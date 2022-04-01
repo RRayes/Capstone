@@ -1,5 +1,6 @@
 import cv2
 from pupil_apriltags import Detector
+import math
 
 
 vid = cv2.VideoCapture(0)
@@ -10,6 +11,8 @@ at_detector = Detector(families='tag36h11',
                        refine_edges=1,
                        decode_sharpening=0.25,
                        debug=0)
+width  = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
+height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 
 while (True):
@@ -17,7 +20,14 @@ while (True):
     ret, frame = vid.read()
     gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    tags = at_detector.detect(gray_image, estimate_tag_pose=False, camera_params=None, tag_size=None)
+    tag_size_cm = 20.5
+
+    focal_length = (1, 1)
+    camera_center = (1, 1)
+
+    tags = at_detector.detect(gray_image, estimate_tag_pose=True,
+                              camera_params=[focal_length[0], focal_length[1], camera_center[0], camera_center[1]],
+                              tag_size=(tag_size_cm / 100))
 
     # Display tag result info on image
     # From https://pyimagesearch.com/2020/11/02/apriltag-with-python/
@@ -39,8 +49,18 @@ while (True):
         cv2.circle(frame, (cX, cY), 5, (0, 0, 255), -1)
         # draw the tag family on the image
         tagFamily = r.tag_family.decode("utf-8")
-        cv2.putText(frame, tagFamily, (ptA[0], ptA[1] - 15),
+        cv2.putText(frame, str(r.tag_id), (cX, cY),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        print(chr(27) + "[2J")
+        print(str(r))
+        distance_total = pow(r.pose_t[0][0],2) + pow(r.pose_t[1][0],2) + pow(r.pose_t[2][0],2)
+        distance_sqrt = math.sqrt(distance_total)
+        print(distance_sqrt)
+
+
+        cv2.line(frame, (cX, cY), (int(width/2), height), (0,255,0), 2)
+
 
     # Display the resulting frame
     cv2.imshow('Frame', frame)
