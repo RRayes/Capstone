@@ -5,10 +5,33 @@ import sys
 import cv2
 from pupil_apriltags import Detector
 import math
+import time
+import traceback
+
+STATE_GO_FARTHEST = 'state_go_farthest'
+STATE_GO_TURN = 'state_go_turn'
+STATE_TURN_LEFT = 'state_turn_left'
+
+TAG_FORWARD = 1
+TAG_TURN_LEFT = 2
+
+
+def millis():
+    return round(time.time() * 1000)
 
 
 def rescale(val, in_min, in_max, out_min, out_max):
     return out_min + (val - in_min) * ((out_max - out_min) / (in_max - in_min))
+
+
+def get_left_right_power_for_tag(tag, frame_width, max_power):
+    distance_total = pow(tag.pose_t[0][0],2) + pow(tag.pose_t[1][0],2) + pow(tag.pose_t[2][0],2)
+    distance_sqrt = math.sqrt(distance_total)
+    forward_speed = int(rescale(distance_sqrt, 0, 3, 0, max_power))
+    turning_speed = int(rescale(int(frame_width/2) - tag.center[0], -1 * (frame_width/2), (frame_width/2), -1 * (max_power / 1), (max_power / 1)))
+    left_speed = int(forward_speed - turning_speed)
+    right_speed = int(forward_speed + turning_speed)
+    return left_speed, right_speed
 
 
 def main(roboclaw):
@@ -23,9 +46,12 @@ def main(roboclaw):
     width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    forward_speed = 0
-    turning_speed = 0
+    left_speed = 0
+    right_speed = 0
     max_speed = 127
+    state = STATE_GO_FARTHEST
+    tag_missing_frames = 0
+    tag_last_seen = 0
 
     while (True):
 
@@ -40,6 +66,8 @@ def main(roboclaw):
         tags = at_detector.detect(gray_image, estimate_tag_pose=True,
                                   camera_params=[focal_length[0], focal_length[1], camera_center[0], camera_center[1]],
                                   tag_size=(tag_size_cm / 100))
+
+        now = millis()
 
         # Display tag result info on image
         # From https://pyimagesearch.com/2020/11/02/apriltag-with-python/
@@ -64,36 +92,85 @@ def main(roboclaw):
             cv2.putText(frame, str(r.tag_id), (cX, cY),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            print(chr(27) + "[2J")
-            print(str(r))
-            distance_total = pow(r.pose_t[0][0],2) + pow(r.pose_t[1][0],2) + pow(r.pose_t[2][0],2)
-            distance_sqrt = math.sqrt(distance_total)
-            print(distance_sqrt)
-            forward_speed = int(rescale(distance_sqrt, 0, 3, 0, max_speed))
-            turning_speed = int(rescale(int(width/2) - cX, -1 * (width/2), (width/2), -1 * (max_speed / 1), (max_speed / 1)))
+        # Find the furthest tag
+        farthest_tag = None
+        for tag in tags:
+            if farthest_tag is None or tag.center[1] < farthest_tag.center[1]:
+                farthest_tag = tag
 
-            cv2.line(frame, (cX, cY), (int(width/2), height), (0,255,0), 2)
+        # Run state machine
+        print(chr(27) + "[2J")
+        print('State: ' + state)
 
-            print('Forward speed ' + str(forward_speed))
-            print('Turning speed ' + str(turning_speed))
+        if state == STATE_GO_FARTHEST:
+            # Adjust power to go to the farthest tag (if one exists)
+            if farthest_tag is not None:
+                left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
+            else:
+                left_speed = left_speed / 2
+                right_speed = right_speed / 2
+
+            # If a turn tag is seen, target that one instead
+            for tag in tags:
+                if tag.tag_id == TAG_TURN_LEFT:
+                    state = STATE_GO_TURN
+                    break
+        elif state == STATE_GO_TURN:
+            turn_tag = None
+            for tag in tags:
+                if tag.tag_id == TAG_TURN_LEFT:
+                    turn_tag = tag
+                    break
+            if now - tag_last_seen > 3000:
+                # Start turning when the turn tag is no longer seen
+                state = STATE_TURN_LEFT
+            elif turn_tag is not None:
+                left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
+            else:
+                left_speed = left_speed / 2
+                right_speed = right_speed / 2
+        elif state == STATE_TURN_LEFT:
+            # Keep turning until the furthest non-turning tag is centered
+            turning_speed = 30
+            left_speed = -1 * turning_speed
+            right_speed = turning_speed
+
+            target_tag = None
+            for tag in tags:
+                if tag.tag_id != TAG_TURN_LEFT and (target_tag is None or tag.center[1] < target_tag.center[1]):
+                    target_tag = tag
+            if target_tag is not None:
+                # Get within x% of center
+                center_error_percentage = 15
+                distance_from_center = target_tag.center[0] - (width/2)
+                distance_percentage = rescale(distance_from_center, -1 * (width/2), (width/2), -100, 100)
+                if abs(distance_percentage) < center_error_percentage:
+                    left_speed = 0
+                    right_speed = 0
+                    state = STATE_GO_FARTHEST
 
         if len(tags) == 0:
-            forward_speed = forward_speed / 2
-            turning_speed = turning_speed / 2
+            tag_missing_frames = tag_missing_frames + 1
+        else:
+            tag_missing_frames = 0
+            tag_last_seen = now
 
-        # Negative means left
-        left_speed = int(forward_speed - turning_speed)
-        right_speed = int(forward_speed + turning_speed)
+        print(left_speed)
+        print(right_speed)
+        if abs(left_speed) < 0.1:
+            left_speed = 0
+        if abs(right_speed) < 0.1:
+            right_speed = 0
 
         if left_speed > 0:
-            roboclaw.ForwardM1(0x80, left_speed)
+            roboclaw.ForwardM1(0x80, int(left_speed))
         else:
-            roboclaw.BackwardM1(0x80, abs(left_speed))
+            roboclaw.BackwardM1(0x80, abs(int(left_speed)))
 
         if right_speed > 0:
-            roboclaw.ForwardM2(0x80, right_speed)
+            roboclaw.ForwardM2(0x80, int(right_speed))
         else:
-            roboclaw.BackwardM2(0x80, abs(right_speed))
+            roboclaw.BackwardM2(0x80, abs(int(right_speed)))
 
         # Display the resulting frame
         cv2.imshow('Frame', frame)
@@ -111,6 +188,8 @@ if __name__ == '__main__':
     try:
         main(roboclaw)
     except (Exception, KeyboardInterrupt, SystemExit) as e:
+        print(traceback.format_exc())
+        print(e)
         print('Interrupted')
         roboclaw.ForwardM1(0x80, 0)
         roboclaw.ForwardM2(0x80, 0)
