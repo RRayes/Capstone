@@ -11,10 +11,13 @@ import traceback
 STATE_GO_FARTHEST = 'state_go_farthest'
 STATE_GO_TURN = 'state_go_turn'
 STATE_TURN_LEFT = 'state_turn_left'
+STATE_GO_TURN_DELAY = 'state_turn_delay'
+STATE_GO_HOME = 'state_go_home'
 
 TAG_FORWARD = 1
 TAG_TURN_LEFT = 2
-
+TAG_TURN_LEFT_DELAY = 3
+TAG_GO_HOME = 4
 
 def millis():
     return round(time.time() * 1000)
@@ -115,13 +118,38 @@ def main(roboclaw):
                 if tag.tag_id == TAG_TURN_LEFT:
                     state = STATE_GO_TURN
                     break
+                if tag.tag_id == TAG_TURN_LEFT_DELAY:
+                    state = STATE_GO_TURN_DELAY
+                    break
         elif state == STATE_GO_TURN:
             turn_tag = None
             for tag in tags:
                 if tag.tag_id == TAG_TURN_LEFT:
                     turn_tag = tag
                     break
+
             if now - tag_last_seen > 3000:
+                # Start turning when the turn tag is no longer seen
+                forward_adjust_speed = 30
+                roboclaw.ForwardM1(0x80, forward_adjust_speed)
+                roboclaw.ForwardM2(0x80, forward_adjust_speed)
+                time.sleep(0.5)
+                roboclaw.ForwardM1(0x80, 0)
+                roboclaw.ForwardM2(0x80, 0)
+                state = STATE_TURN_LEFT
+            elif turn_tag is not None:
+                left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
+            else:
+                left_speed = left_speed / 2
+                right_speed = right_speed / 2
+        elif state == STATE_GO_TURN_DELAY:
+            turn_tag = None
+            for tag in tags:
+                if tag.tag_id == TAG_TURN_LEFT_DELAY:
+                    turn_tag = tag
+                    break
+
+            if now - tag_last_seen > 10000:
                 # Start turning when the turn tag is no longer seen
                 state = STATE_TURN_LEFT
             elif turn_tag is not None:
@@ -148,6 +176,14 @@ def main(roboclaw):
                     left_speed = 0
                     right_speed = 0
                     state = STATE_GO_FARTHEST
+
+        elif state == STATE_GO_HOME:
+            # Adjust power to go to the farthest tag (if one exists)
+            if farthest_tag is not None:
+                left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
+            else:
+                left_speed = left_speed / 2
+                right_speed = right_speed / 2
 
         if len(tags) == 0:
             tag_missing_frames = tag_missing_frames + 1
