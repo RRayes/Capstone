@@ -181,14 +181,16 @@ def main(roboclaw):
             #else:
             #    started_turning = now
 
-            min_turn_time_ms = 4000
+            min_turn_time_ms = 3000
             left_speed = -1 * turning_speed
             right_speed = turning_speed
 
             if started_turning < now - min_turn_time_ms:
                 valid_tag = None
                 for tag in tags:
-                    if turn_tags.count(tag.tag_id) == 0 and (valid_tag is None or tag.center[1] < valid_tag.center[1]):
+                    # tag.center[1] > valid_tag.center[1] for closest, < for farthest
+                    # Top of the image has lower y-values
+                    if turn_tags.count(tag.tag_id) == 0 and (valid_tag is None or tag.center[1] > valid_tag.center[1]):
                         valid_tag = tag
                 if valid_tag is not None:
                     # Get within x% of center
