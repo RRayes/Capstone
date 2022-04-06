@@ -68,6 +68,7 @@ def main(roboclaw):
     tag_last_seen = 0
     slowest_turning_speed = 0
     turn_tag_last_seen = 0
+    target_last_seen = 0
     started_turning = 0
     target_tag = None
     last_target_tag_distance = 0
@@ -157,15 +158,9 @@ def main(roboclaw):
                         (state == STATE_GO_TURN_HOME and tag.tag_id == TAG_GO_HOME)):
                     turn_tag = tag
                     break
-            delay_time = 6000 if (state == STATE_GO_TURN_DELAY) else 1000
-            if now - turn_tag_last_seen > delay_time:
+            delay_time = 6000 if (state == STATE_GO_TURN_DELAY) else 3000
+            if now - target_last_seen > delay_time:
                 # Start turning when the turn tag is no longer seen
-                forward_adjust_speed = 30
-                roboclaw.ForwardM1(0x80, forward_adjust_speed)
-                roboclaw.ForwardM2(0x80, forward_adjust_speed)
-                time.sleep(0.8)
-                roboclaw.ForwardM1(0x80, 0)
-                roboclaw.ForwardM2(0x80, 0)
                 time.sleep(0.5)
                 state = STATE_TURN_LEFT if state != STATE_GO_TURN_HOME else STATE_TURN_HOME
                 started_turning = now
@@ -178,16 +173,15 @@ def main(roboclaw):
                 right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
         elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME:
             # Keep turning until the furthest non-turning tag is centered
+            #rampup_ms = 3000
+            max_turn_speed = 50
+            #turning_time = now - started_turning
+            #turning_speed = max_turn_speed if turning_time > rampup_ms else rescale(turning_time, 0, rampup_ms, max_turn_speed / 2, max_turn_speed)
             turning_speed = 50
-            #satisfied = True
-            #if roboclaw.ReadSpeedM2(0x80)[1] < 50:
-            #    slowest_turning_speed = slowest_turning_speed + 1
-            #    time.sleep(0.07)
-            #    satisfied = False
-            #else:
-            #    started_turning = now
+            if state == STATE_TURN_HOME:
+                turning_speed = turning_speed * -1
 
-            min_turn_time_ms = 3000
+            min_turn_time_ms = 2000
             left_speed = -1 * turning_speed
             right_speed = turning_speed
 
@@ -196,8 +190,12 @@ def main(roboclaw):
                 for tag in tags:
                     # tag.center[1] > valid_tag.center[1] for closest, < for farthest
                     # Top of the image has lower y-values
-                    if turn_tags.count(tag.tag_id) == 0 and (valid_tag is None or tag.center[1] > valid_tag.center[1]):
-                        valid_tag = tag
+                    if state == STATE_TURN_HOME:
+                        if (valid_tag is None or tag.center[1] > valid_tag.center[1]):
+                            valid_tag = tag
+                    else:
+                        if turn_tags.count(tag.tag_id) == 0 and (valid_tag is None or tag.center[1] > valid_tag.center[1]):
+                            valid_tag = tag
                 if valid_tag is not None:
                     # Get within x% of center
                     center_error_percentage = 15
@@ -232,6 +230,7 @@ def main(roboclaw):
             distance_total = pow(target_tag.pose_t[0][0],2) + pow(target_tag.pose_t[1][0],2) + pow(target_tag.pose_t[2][0],2)
             distance_sqrt = math.sqrt(distance_total)
             last_target_tag_distance = distance_sqrt
+            target_last_seen = now
 
             # Show line to target tag
             cv2.line(frame, (int(width/2), int(height)), (int(target_tag.center[0]), int(target_tag.center[1])), (0, 0, 255), 3)
@@ -239,7 +238,7 @@ def main(roboclaw):
 
 
         for t in tags:
-            if turn_tags.count(t.tag_id) > 0:
+            if turn_tags.count(t.tag_id) > 0 or t.tag_id == TAG_GO_HOME:
                 turn_tag_last_seen = now
                 break
 
