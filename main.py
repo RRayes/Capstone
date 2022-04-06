@@ -1,5 +1,4 @@
 from roboclaw.roboclaw_3 import Roboclaw
-import time
 import os
 import sys
 import cv2
@@ -33,7 +32,13 @@ def get_left_right_power_for_tag(tag, frame_width, max_power):
     distance_total = pow(tag.pose_t[0][0],2) + pow(tag.pose_t[1][0],2) + pow(tag.pose_t[2][0],2)
     distance_sqrt = math.sqrt(distance_total)
     forward_speed = int(rescale(distance_sqrt, 0, 3, 0, max_power))
-    turning_speed = int(rescale(int(frame_width/2) - tag.center[0], -1 * (frame_width/2), (frame_width/2), -1 * (max_power / 1), (max_power / 1)))
+    turning_weight = 0.5
+    turning_speed = int(rescale(
+        int(frame_width/2) - tag.center[0],
+        -1 * (frame_width/2),
+        (frame_width/2),
+        -1 * (max_power * turning_weight),
+        (max_power * turning_weight)))
     left_speed = int(forward_speed - turning_speed)
     right_speed = int(forward_speed + turning_speed)
     return left_speed, right_speed
