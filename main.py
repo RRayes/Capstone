@@ -6,6 +6,8 @@ from pupil_apriltags import Detector
 import math
 import time
 import traceback
+import serial
+
 
 STATE_GO_FARTHEST = 'state_go_farthest'
 STATE_GO_TURN = 'state_go_turn'
@@ -50,6 +52,7 @@ def get_left_right_power_for_tag(tag, frame_width, max_power):
 
 def main(roboclaw):
     vid = cv2.VideoCapture(0)
+    arduino_serial = serial.Serial('/dev/ttyACM1')
     at_detector = Detector(families='tag36h11',
                            nthreads=1,
                            quad_decimate=1.0,
@@ -214,7 +217,9 @@ def main(roboclaw):
                         if state == STATE_TURN_LEFT_DELAY:
                             roboclaw.ForwardM1(0x80, 0)
                             roboclaw.ForwardM2(0x80, 0)
-                            time.sleep(6)
+                            arduino_serial.write(b"relay-on\n")
+                            time.sleep(10)
+                            arduino_serial.write(b"relay-off\n")
                         state = STATE_GO_FARTHEST if state != STATE_TURN_HOME else STATE_GO_HOME
 
         elif state == STATE_GO_HOME:
