@@ -10,6 +10,7 @@ import traceback
 STATE_GO_FARTHEST = 'state_go_farthest'
 STATE_GO_TURN = 'state_go_turn'
 STATE_TURN_LEFT = 'state_turn_left'
+STATE_TURN_LEFT_DELAY = 'state_turn_left_delay'
 STATE_GO_TURN_DELAY = 'state_go_turn_delay'
 STATE_GO_TURN_HOME = 'state_go_turn_home'
 STATE_TURN_HOME = 'state_turn_home'
@@ -158,11 +159,16 @@ def main(roboclaw):
                         (state == STATE_GO_TURN_HOME and tag.tag_id == TAG_GO_HOME)):
                     turn_tag = tag
                     break
-            delay_time = 6000 if (state == STATE_GO_TURN_DELAY) else 3000
+            delay_time = 3000
             if now - target_last_seen > delay_time:
                 # Start turning when the turn tag is no longer seen
                 time.sleep(0.5)
-                state = STATE_TURN_LEFT if state != STATE_GO_TURN_HOME else STATE_TURN_HOME
+                if state == STATE_GO_TURN_DELAY:
+                    state = STATE_TURN_LEFT_DELAY
+                elif state == STATE_GO_TURN:
+                    state = STATE_TURN_LEFT
+                elif state == STATE_GO_TURN_HOME:
+                    state = STATE_TURN_HOME
                 started_turning = now
             elif turn_tag is not None:
                 target_tag = turn_tag
@@ -171,7 +177,7 @@ def main(roboclaw):
                 power_loss = power_loss_per_second * (elapsed / 1000)
                 left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
                 right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
-        elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME:
+        elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME or state == STATE_TURN_LEFT_DELAY:
             # Keep turning until the furthest non-turning tag is centered
             #rampup_ms = 3000
             max_turn_speed = 50
@@ -205,6 +211,10 @@ def main(roboclaw):
                         left_speed = 0
                         right_speed = 0
                         target_tag = valid_tag
+                        if state == STATE_TURN_LEFT_DELAY:
+                            roboclaw.ForwardM1(0x80, 0)
+                            roboclaw.ForwardM2(0x80, 0)
+                            time.sleep(6)
                         state = STATE_GO_FARTHEST if state != STATE_TURN_HOME else STATE_GO_HOME
 
         elif state == STATE_GO_HOME:
