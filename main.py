@@ -69,6 +69,9 @@ def main(roboclaw):
     started_turning = 0
     target_tag = None
     last_target_tag_distance = 0
+    now = 0
+
+    power_loss_per_second = 17
 
     while (True):
 
@@ -84,7 +87,10 @@ def main(roboclaw):
                                   camera_params=[focal_length[0], focal_length[1], camera_center[0], camera_center[1]],
                                   tag_size=(tag_size_cm / 100))
 
+        old_now = now
         now = millis()
+        elapsed = 0 if old_now == 0 else now - old_now
+
         target_tag = None
 
         # Display tag result info on image
@@ -126,8 +132,9 @@ def main(roboclaw):
                 target_tag = farthest_tag
                 left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
             else:
-                left_speed = left_speed / 2
-                right_speed = right_speed / 2
+                power_loss = power_loss_per_second * (elapsed / 1000)
+                left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
+                right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
 
             # If a turn tag is seen, target that one instead
             for tag in tags:
@@ -150,7 +157,7 @@ def main(roboclaw):
                 forward_adjust_speed = 30
                 roboclaw.ForwardM1(0x80, forward_adjust_speed)
                 roboclaw.ForwardM2(0x80, forward_adjust_speed)
-                time.sleep(1.8)
+                time.sleep(0.8)
                 roboclaw.ForwardM1(0x80, 0)
                 roboclaw.ForwardM2(0x80, 0)
                 time.sleep(0.5)
@@ -160,8 +167,9 @@ def main(roboclaw):
                 target_tag = turn_tag
                 left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
             else:
-                left_speed = left_speed / 2
-                right_speed = right_speed / 2
+                power_loss = power_loss_per_second * (elapsed / 1000)
+                left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
+                right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
         elif state == STATE_TURN_LEFT:
             # Keep turning until the furthest non-turning tag is centered
             turning_speed = 50
@@ -200,8 +208,9 @@ def main(roboclaw):
                 left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
                 target_tag = valid_tag
             else:
-                left_speed = left_speed / 2
-                right_speed = right_speed / 2
+                power_loss = power_loss_per_second * (elapsed / 1000)
+                left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
+                right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
 
         if state_history[-1] != state:
             state_history.append(state)
