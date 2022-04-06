@@ -11,6 +11,8 @@ STATE_GO_FARTHEST = 'state_go_farthest'
 STATE_GO_TURN = 'state_go_turn'
 STATE_TURN_LEFT = 'state_turn_left'
 STATE_GO_TURN_DELAY = 'state_go_turn_delay'
+STATE_GO_TURN_HOME = 'state_go_turn_home'
+STATE_TURN_HOME = 'state_turn_home'
 STATE_GO_HOME = 'state_go_home'
 
 TAG_FORWARD = 1
@@ -19,7 +21,7 @@ TAG_TURN_LEFT_DELAY = 3
 TAG_GO_HOME = 4
 
 turn_tags = [TAG_TURN_LEFT, TAG_TURN_LEFT_DELAY]
-go_to_turn_states = [STATE_GO_TURN, STATE_GO_TURN_DELAY]
+go_to_turn_states = [STATE_GO_TURN, STATE_GO_TURN_DELAY, STATE_GO_TURN_HOME]
 
 def millis():
     return round(time.time() * 1000)
@@ -144,11 +146,15 @@ def main(roboclaw):
                 if tag.tag_id == TAG_TURN_LEFT_DELAY:
                     state = STATE_GO_TURN_DELAY
                     break
+                if tag.tag_id == TAG_GO_HOME:
+                    state = STATE_GO_TURN_HOME
+                    break
         elif go_to_turn_states.count(state) > 0:
             turn_tag = None
             for tag in tags:
                 if ((state == STATE_GO_TURN and tag.tag_id == TAG_TURN_LEFT) or
-                        (state == STATE_GO_TURN_DELAY and tag.tag_id == TAG_TURN_LEFT_DELAY)):
+                        (state == STATE_GO_TURN_DELAY and tag.tag_id == TAG_TURN_LEFT_DELAY) or
+                        (state == STATE_GO_TURN_HOME and tag.tag_id == TAG_GO_HOME)):
                     turn_tag = tag
                     break
             delay_time = 6000 if (state == STATE_GO_TURN_DELAY) else 1000
@@ -161,7 +167,7 @@ def main(roboclaw):
                 roboclaw.ForwardM1(0x80, 0)
                 roboclaw.ForwardM2(0x80, 0)
                 time.sleep(0.5)
-                state = STATE_TURN_LEFT
+                state = STATE_TURN_LEFT if state != STATE_GO_TURN_HOME else STATE_TURN_HOME
                 started_turning = now
             elif turn_tag is not None:
                 target_tag = turn_tag
@@ -170,7 +176,7 @@ def main(roboclaw):
                 power_loss = power_loss_per_second * (elapsed / 1000)
                 left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
                 right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
-        elif state == STATE_TURN_LEFT:
+        elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME:
             # Keep turning until the furthest non-turning tag is centered
             turning_speed = 50
             #satisfied = True
@@ -201,14 +207,13 @@ def main(roboclaw):
                         left_speed = 0
                         right_speed = 0
                         target_tag = valid_tag
-                        state = STATE_GO_FARTHEST
+                        state = STATE_GO_FARTHEST if state != STATE_TURN_HOME else STATE_GO_HOME
 
         elif state == STATE_GO_HOME:
             # Adjust power to go to the farthest tag (if one exists)
-
             if farthest_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
-                target_tag = valid_tag
+                target_tag = farthest_tag
             else:
                 power_loss = power_loss_per_second * (elapsed / 1000)
                 left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
