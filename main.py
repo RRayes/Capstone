@@ -128,14 +128,15 @@ def main(roboclaw):
                     turn_tag = tag
                     break
 
-            if now - tag_last_seen > 3000:
+            if now - tag_last_seen > 500:
                 # Start turning when the turn tag is no longer seen
                 forward_adjust_speed = 30
                 roboclaw.ForwardM1(0x80, forward_adjust_speed)
                 roboclaw.ForwardM2(0x80, forward_adjust_speed)
-                time.sleep(0.5)
+                time.sleep(1.8)
                 roboclaw.ForwardM1(0x80, 0)
                 roboclaw.ForwardM2(0x80, 0)
+                time.sleep(0.5)
                 state = STATE_TURN_LEFT
             elif turn_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
@@ -149,8 +150,15 @@ def main(roboclaw):
                     turn_tag = tag
                     break
 
-            if now - tag_last_seen > 10000:
+            if now - tag_last_seen > 3000:
                 # Start turning when the turn tag is no longer seen
+                forward_adjust_speed = 30
+                roboclaw.ForwardM1(0x80, forward_adjust_speed)
+                roboclaw.ForwardM2(0x80, forward_adjust_speed)
+                time.sleep(1.8)
+                roboclaw.ForwardM1(0x80, 0)
+                roboclaw.ForwardM2(0x80, 0)
+                time.sleep(0.5)
                 state = STATE_TURN_LEFT
             elif turn_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
@@ -160,8 +168,8 @@ def main(roboclaw):
         elif state == STATE_TURN_LEFT:
             # Keep turning until the furthest non-turning tag is centered
             turning_speed = 30
-            left_speed = -1 * turning_speed
-            right_speed = turning_speed
+            left_speed = -2.0 * turning_speed
+            right_speed = turning_speed * 2.0
 
             target_tag = None
             for tag in tags:
@@ -179,6 +187,7 @@ def main(roboclaw):
 
         elif state == STATE_GO_HOME:
             # Adjust power to go to the farthest tag (if one exists)
+
             if farthest_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
             else:
