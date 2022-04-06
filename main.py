@@ -11,13 +11,15 @@ import traceback
 STATE_GO_FARTHEST = 'state_go_farthest'
 STATE_GO_TURN = 'state_go_turn'
 STATE_TURN_LEFT = 'state_turn_left'
-STATE_GO_TURN_DELAY = 'state_turn_delay'
+STATE_GO_TURN_DELAY = 'state_go_turn_delay'
 STATE_GO_HOME = 'state_go_home'
 
 TAG_FORWARD = 1
 TAG_TURN_LEFT = 2
 TAG_TURN_LEFT_DELAY = 3
 TAG_GO_HOME = 4
+
+turn_tags = [TAG_TURN_LEFT, TAG_TURN_LEFT_DELAY]
 
 def millis():
     return round(time.time() * 1000)
@@ -53,8 +55,12 @@ def main(roboclaw):
     right_speed = 0
     max_speed = 127
     state = STATE_GO_FARTHEST
+    state_history = [state]
     tag_missing_frames = 0
     tag_last_seen = 0
+    slowest_turning_speed = 0
+    turn_tag_last_seen = 0
+    started_turning = 0
 
     while (True):
 
@@ -128,7 +134,7 @@ def main(roboclaw):
                     turn_tag = tag
                     break
 
-            if now - tag_last_seen > 500:
+            if now - turn_tag_last_seen > 1000:
                 # Start turning when the turn tag is no longer seen
                 forward_adjust_speed = 30
                 roboclaw.ForwardM1(0x80, forward_adjust_speed)
@@ -138,6 +144,7 @@ def main(roboclaw):
                 roboclaw.ForwardM2(0x80, 0)
                 time.sleep(0.5)
                 state = STATE_TURN_LEFT
+                started_turning = now
             elif turn_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
             else:
@@ -150,7 +157,7 @@ def main(roboclaw):
                     turn_tag = tag
                     break
 
-            if now - tag_last_seen > 3000:
+            if now - turn_tag_last_seen > 6000:
                 # Start turning when the turn tag is no longer seen
                 forward_adjust_speed = 30
                 roboclaw.ForwardM1(0x80, forward_adjust_speed)
@@ -160,6 +167,7 @@ def main(roboclaw):
                 roboclaw.ForwardM2(0x80, 0)
                 time.sleep(0.5)
                 state = STATE_TURN_LEFT
+                started_turning = now
             elif turn_tag is not None:
                 left_speed, right_speed = get_left_right_power_for_tag(turn_tag, width, max_speed)
             else:
@@ -167,23 +175,33 @@ def main(roboclaw):
                 right_speed = right_speed / 2
         elif state == STATE_TURN_LEFT:
             # Keep turning until the furthest non-turning tag is centered
-            turning_speed = 30
-            left_speed = -2.0 * turning_speed
-            right_speed = turning_speed * 2.0
+            turning_speed = 50
+            #satisfied = True
+            #if roboclaw.ReadSpeedM2(0x80)[1] < 50:
+            #    slowest_turning_speed = slowest_turning_speed + 1
+            #    time.sleep(0.07)
+            #    satisfied = False
+            #else:
+            #    started_turning = now
 
-            target_tag = None
-            for tag in tags:
-                if tag.tag_id != TAG_TURN_LEFT and (target_tag is None or tag.center[1] < target_tag.center[1]):
-                    target_tag = tag
-            if target_tag is not None:
-                # Get within x% of center
-                center_error_percentage = 15
-                distance_from_center = target_tag.center[0] - (width/2)
-                distance_percentage = rescale(distance_from_center, -1 * (width/2), (width/2), -100, 100)
-                if abs(distance_percentage) < center_error_percentage:
-                    left_speed = 0
-                    right_speed = 0
-                    state = STATE_GO_FARTHEST
+            min_turn_time_ms = 4000
+            left_speed = -1 * turning_speed
+            right_speed = turning_speed
+
+            if started_turning < now - min_turn_time_ms:
+                target_tag = None
+                for tag in tags:
+                    if tag.tag_id != TAG_TURN_LEFT and (target_tag is None or tag.center[1] < target_tag.center[1]):
+                        target_tag = tag
+                if target_tag is not None:
+                    # Get within x% of center
+                    center_error_percentage = 15
+                    distance_from_center = target_tag.center[0] - (width/2)
+                    distance_percentage = rescale(distance_from_center, -1 * (width/2), (width/2), -100, 100)
+                    if abs(distance_percentage) < center_error_percentage:
+                        left_speed = 0
+                        right_speed = 0
+                        state = STATE_GO_FARTHEST
 
         elif state == STATE_GO_HOME:
             # Adjust power to go to the farthest tag (if one exists)
@@ -194,28 +212,38 @@ def main(roboclaw):
                 left_speed = left_speed / 2
                 right_speed = right_speed / 2
 
+        if state_history[-1] != state:
+            state_history.append(state)
+
         if len(tags) == 0:
             tag_missing_frames = tag_missing_frames + 1
         else:
             tag_missing_frames = 0
             tag_last_seen = now
 
+        for t in tags:
+            if turn_tags.count(t.tag_id) > 0:
+                turn_tag_last_seen = now
+                break
+
         print(left_speed)
         print(right_speed)
+        print('State history: ')
+        print(state_history)
         if abs(left_speed) < 0.1:
             left_speed = 0
         if abs(right_speed) < 0.1:
             right_speed = 0
 
         if left_speed > 0:
-            roboclaw.ForwardM1(0x80, int(left_speed))
+            roboclaw.ForwardM1(0x80, min(127, int(left_speed)))
         else:
-            roboclaw.BackwardM1(0x80, abs(int(left_speed)))
+            roboclaw.BackwardM1(0x80, max(-127, abs(int(left_speed))))
 
         if right_speed > 0:
-            roboclaw.ForwardM2(0x80, int(right_speed))
+            roboclaw.ForwardM2(0x80, min(127, int(right_speed)))
         else:
-            roboclaw.BackwardM2(0x80, abs(int(right_speed)))
+            roboclaw.BackwardM2(0x80, max(-127, abs(int(right_speed))))
 
         # Display the resulting frame
         cv2.imshow('Frame', frame)
