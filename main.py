@@ -237,10 +237,10 @@ def main(roboclaw):
                 left_speed, right_speed = get_left_right_power_for_tag(closest_tag, width, max_speed)
                 target_tag = closest_tag
             else:
-                if now - target_last_seen > 5000:
+                if now - target_last_seen > 1000:
                     roboclaw.ForwardM1(0x80, 60)
                     roboclaw.ForwardM2(0x80, 60)
-                    time.sleep(2)
+                    time.sleep(2.5)
                     roboclaw.ForwardM1(0x80, 0)
                     roboclaw.ForwardM2(0x80, 0)
                     state = STATE_TURN_FINAL
