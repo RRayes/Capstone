@@ -17,6 +17,7 @@ STATE_GO_TURN_DELAY = 'state_go_turn_delay'
 STATE_GO_TURN_HOME = 'state_go_turn_home'
 STATE_TURN_HOME = 'state_turn_home'
 STATE_GO_HOME = 'state_go_home'
+STATE_TURN_FINAL = 'state_turn_final'
 
 TAG_FORWARD = 1
 TAG_TURN_LEFT = 2
@@ -76,6 +77,7 @@ def main(roboclaw):
     started_turning = 0
     target_tag = None
     last_target_tag_distance = 0
+    target_tag_from = TAG_TURN_LEFT
     now = 0
 
     power_loss_per_second = 17
@@ -180,12 +182,8 @@ def main(roboclaw):
                 power_loss = power_loss_per_second * (elapsed / 1000)
                 left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
                 right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
-        elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME or state == STATE_TURN_LEFT_DELAY:
+        elif state == STATE_TURN_LEFT or state == STATE_TURN_HOME or state == STATE_TURN_LEFT_DELAY or state == STATE_TURN_FINAL:
             # Keep turning until the furthest non-turning tag is centered
-            #rampup_ms = 3000
-            max_turn_speed = 50
-            #turning_time = now - started_turning
-            #turning_speed = max_turn_speed if turning_time > rampup_ms else rescale(turning_time, 0, rampup_ms, max_turn_speed / 2, max_turn_speed)
             turning_speed = 50
             if state == STATE_TURN_HOME:
                 turning_speed = turning_speed * -1
@@ -200,7 +198,7 @@ def main(roboclaw):
                     # tag.center[1] > valid_tag.center[1] for closest, < for farthest
                     # Top of the image has lower y-values
                     if state == STATE_TURN_HOME:
-                        if (valid_tag is None or tag.center[1] > valid_tag.center[1]):
+                        if tag.tag_id == target_tag_from and (valid_tag is None or tag.center[1] > valid_tag.center[1]):
                             valid_tag = tag
                     else:
                         if turn_tags.count(tag.tag_id) == 0 and (valid_tag is None or tag.center[1] > valid_tag.center[1]):
@@ -220,17 +218,36 @@ def main(roboclaw):
                             arduino_serial.write(b"relay-on\n")
                             time.sleep(10)
                             arduino_serial.write(b"relay-off\n")
-                        state = STATE_GO_FARTHEST if state != STATE_TURN_HOME else STATE_GO_HOME
+
+                        if state == STATE_TURN_FINAL:
+                            roboclaw.ForwardM1(0x80, 0)
+                            roboclaw.ForwardM2(0x80, 0)
+                            time.sleep(0.5)
+                            exit(0)
+                        else:
+                            state = STATE_GO_FARTHEST if state != STATE_TURN_HOME else STATE_GO_HOME
 
         elif state == STATE_GO_HOME:
-            # Adjust power to go to the farthest tag (if one exists)
-            if farthest_tag is not None:
-                left_speed, right_speed = get_left_right_power_for_tag(farthest_tag, width, max_speed)
-                target_tag = farthest_tag
+            # Adjust power to go to the closest tag (if one exists)
+            closest_tag = None
+            for tag in tags:
+                if closest_tag is None or tag.center[1] > closest_tag.center[1]:
+                    closest_tag = tag
+            if closest_tag is not None:
+                left_speed, right_speed = get_left_right_power_for_tag(closest_tag, width, max_speed)
+                target_tag = closest_tag
             else:
-                power_loss = power_loss_per_second * (elapsed / 1000)
-                left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
-                right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
+                if now - target_last_seen > 5000:
+                    roboclaw.ForwardM1(0x80, 60)
+                    roboclaw.ForwardM2(0x80, 60)
+                    time.sleep(2)
+                    roboclaw.ForwardM1(0x80, 0)
+                    roboclaw.ForwardM2(0x80, 0)
+                    state = STATE_TURN_FINAL
+                else:
+                    power_loss = power_loss_per_second * (elapsed / 1000)
+                    left_speed = max(left_speed - power_loss, 0) if left_speed > 0 else min(0, left_speed + power_loss)
+                    right_speed = max(right_speed - power_loss, 0) if right_speed > 0 else min(0, right_speed + power_loss)
 
         if state_history[-1] != state:
             state_history.append(state)
